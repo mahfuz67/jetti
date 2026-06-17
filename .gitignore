@@ -1,0 +1,19 @@
+node_modules/
+dist/
+.env
+*.log
+# Scratch runs at logs/ are ignored; the committed submission artifact lives in
+# logs/samples/ (LOG_DIR=logs/samples npm run batch) and is intentionally tracked.
+logs/*.jsonl
+!logs/samples/
+keys/
+*.pem
+.DS_Store
+
+# grant submission artifacts (not project source)
+claude-session.jsonl
+codex-session.jsonl
+grant-application.md
+
+# architecture doc is hosted separately (gist); kept locally, not in the repo
+ARCHITECTURE.md

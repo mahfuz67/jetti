@@ -1,0 +1,38 @@
+{
+  "name": "jetti",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Jetti — a smart Solana transaction stack: Yellowstone streaming, Jito bundles, lifecycle tracking, and an AI-driven retry agent.",
+  "type": "module",
+  "packageManager": "yarn@1.22.19",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "smoke": "tsx src/scripts/smoke.ts",
+    "stream": "tsx src/scripts/stream-probe.ts",
+    "bundle:one": "tsx src/scripts/send-one.ts",
+    "batch": "tsx src/scripts/run-batch.ts",
+    "demo:fault": "tsx src/scripts/demo-fault.ts",
+    "report": "tsx src/scripts/report.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "@grpc/grpc-js": "^1.14.4",
+    "@solana/web3.js": "^1.95.8",
+    "@triton-one/yellowstone-grpc": "^1.4.1",
+    "bs58": "^6.0.0",
+    "dotenv": "^16.4.7",
+    "pino": "^9.5.0",
+    "pino-pretty": "^13.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
