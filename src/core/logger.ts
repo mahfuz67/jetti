@@ -2,7 +2,10 @@ import pino, { type LoggerOptions } from "pino";
 
 const options: LoggerOptions = { level: process.env.LOG_LEVEL ?? "info" };
 
-if (process.env.NODE_ENV !== "production") {
+// pino-pretty runs as a worker-thread transport that can't be resolved inside a
+// bundled server runtime (e.g. Next.js, which sets NEXT_RUNTIME); fall back to
+// plain JSON logging there.
+if (process.env.NODE_ENV !== "production" && !process.env.NEXT_RUNTIME) {
   options.transport = {
     target: "pino-pretty",
     options: {

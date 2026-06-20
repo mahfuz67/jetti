@@ -19,8 +19,6 @@ const filePath = (): string => {
 
 export const appendLifecycle = (record: BundleLifecycle): void => {
   mkdirSync(LOG_DIR, { recursive: true });
-  // Enrich each attempt with its inter-stage latency deltas so the persisted
-  // entry carries them directly rather than forcing readers to derive them.
   const serialized: BundleLifecycle = {
     ...record,
     attempts: record.attempts.map((a) => ({

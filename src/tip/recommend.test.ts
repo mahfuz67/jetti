@@ -15,8 +15,12 @@ const tips: TipPercentiles = {
 };
 
 describe("recommendBaseTip", () => {
-  it("returns at least p50 in calm conditions", () => {
-    expect(recommendBaseTip(tips, { skipRate: 0 }, MAX)).toBe(10_000);
+  it("defaults to p75 in calm conditions", () => {
+    expect(recommendBaseTip(tips, { skipRate: 0 }, MAX)).toBe(50_000);
+  });
+
+  it("honors the configured percentile", () => {
+    expect(recommendBaseTip(tips, { skipRate: 0 }, MAX, "p50")).toBe(10_000);
   });
 
   it("scales up under congestion", () => {

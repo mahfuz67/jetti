@@ -76,6 +76,9 @@ export interface BundleAttempt {
   // Latency deltas (ms) between adjacent stages, filled at log-write time so the
   // persisted record carries them directly rather than requiring derivation.
   deltas?: Record<string, number>;
+  // Wall-clock (ms) of the stack's own operations on this attempt: blockhash
+  // fetch, build, send, track, classify, AI decision. Where the latency lives.
+  timings?: Record<string, number>;
   failure: FailureInfo | null;
   decision: RetryDecision | null;
 }

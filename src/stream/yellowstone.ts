@@ -6,7 +6,7 @@ import YellowstoneClient, {
 } from "@triton-one/yellowstone-grpc";
 import type { ClientDuplexStream } from "@grpc/grpc-js";
 import bs58 from "bs58";
-import { config } from "@/config/env";
+import type { JettiConfig } from "@/config/env";
 import { child } from "@/core/logger";
 import { sleep, withBackoff } from "@/core/sleep";
 
@@ -86,6 +86,10 @@ export class YellowstoneStream extends EventEmitter {
   private running = false;
   private attempt = 0;
 
+  constructor(private readonly config: JettiConfig) {
+    super();
+  }
+
   async start(): Promise<void> {
     this.running = true;
     while (this.running) {
@@ -115,15 +119,15 @@ export class YellowstoneStream extends EventEmitter {
 
   private async connect(): Promise<void> {
     this.client = new ClientCtor(
-      config.grpc.url,
-      config.grpc.token || undefined,
+      this.config.grpc.url,
+      this.config.grpc.token || undefined,
       undefined,
     );
     this.stream = await this.client.subscribe();
-    await this.write(buildRequest(config.wallet.publicKey.toBase58()));
+    await this.write(buildRequest(this.config.wallet.publicKey.toBase58()));
     this.startPing();
     this.emit("connect");
-    log.info({ url: config.grpc.url }, "yellowstone connected");
+    log.info({ url: this.config.grpc.url }, "yellowstone connected");
   }
 
   private async consume(): Promise<void> {

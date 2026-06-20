@@ -19,6 +19,9 @@ export const renderLifecycle = (lc: BundleLifecycle): string => {
     if (Object.keys(deltas).length > 0) {
       lines.push(`    deltas(ms): ${JSON.stringify(deltas)}`);
     }
+    if (a.timings && Object.keys(a.timings).length > 0) {
+      lines.push(`    timings(ms): ${JSON.stringify(a.timings)}`);
+    }
     if (a.failure)
       lines.push(`    failure: ${a.failure.class} — ${a.failure.detail}`);
     if (a.decision) {

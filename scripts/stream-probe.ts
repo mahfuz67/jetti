@@ -1,7 +1,8 @@
 import { YellowstoneStream } from "@/stream/yellowstone";
+import { loadConfigFromEnv } from "@/config/env";
 import { logger } from "@/core/logger";
 
-const stream = new YellowstoneStream();
+const stream = new YellowstoneStream(loadConfigFromEnv());
 
 stream.on("connect", () => logger.info("connected"));
 stream.on("disconnect", (err) =>

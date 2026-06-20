@@ -1,7 +1,8 @@
 import { YellowstoneStream } from "./yellowstone";
 
-export const startStream = async (): Promise<YellowstoneStream> => {
-  const stream = new YellowstoneStream();
+export const startStream = async (
+  stream: YellowstoneStream,
+): Promise<YellowstoneStream> => {
   const ready = new Promise<void>((resolve) =>
     stream.once("connect", () => resolve()),
   );

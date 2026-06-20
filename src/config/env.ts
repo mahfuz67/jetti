@@ -1,8 +1,9 @@
+import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
 import dotenv from "dotenv";
 import { Keypair } from "@solana/web3.js";
-
-dotenv.config({ override: true });
 import bs58 from "bs58";
+import type { TipPercentileKey } from "@/tip/recommend";
 
 const JITO_REGIONS = [
   "mainnet",
@@ -17,6 +18,20 @@ const JITO_REGIONS = [
 ] as const;
 
 export type JitoRegion = (typeof JITO_REGIONS)[number];
+
+export interface JettiConfig {
+  rpc: { http: string; wss?: string };
+  grpc: { url: string; token: string };
+  jito: { region: JitoRegion; blockEngineUrl: string; tipFloorUrl: string };
+  wallet: Keypair;
+  ai: { apiKey: string; model: string };
+  tuning: {
+    leaderWindowSlots: number;
+    maxTipLamports: number;
+    probeTransferLamports: number;
+    baseTipPercentile: TipPercentileKey;
+  };
+}
 
 const required = (key: string): string => {
   const value = process.env[key];
@@ -44,6 +59,16 @@ const parseRegion = (raw: string): JitoRegion => {
   );
 };
 
+const TIP_PERCENTILES = ["p25", "p50", "p75", "p95", "p99"] as const;
+
+const parseTipPercentile = (raw: string): TipPercentileKey => {
+  if ((TIP_PERCENTILES as readonly string[]).includes(raw))
+    return raw as TipPercentileKey;
+  throw new Error(
+    `BASE_TIP_PERCENTILE must be one of ${TIP_PERCENTILES.join(", ")}, got "${raw}"`,
+  );
+};
+
 const loadKeypair = (secret: string): Keypair => {
   try {
     return Keypair.fromSecretKey(bs58.decode(secret));
@@ -52,37 +77,50 @@ const loadKeypair = (secret: string): Keypair => {
   }
 };
 
-const region = parseRegion(optional("JITO_REGION", "frankfurt"));
-
-const blockEngineUrl =
+const blockEngineUrlFor = (region: JitoRegion): string =>
   region === "mainnet"
     ? "https://mainnet.block-engine.jito.wtf"
     : `https://${region}.mainnet.block-engine.jito.wtf`;
 
-export const config = {
-  rpc: {
-    http: required("RPC_HTTP_URL"),
-    wss: process.env.RPC_WSS_URL,
-  },
-  grpc: {
-    url: required("GRPC_URL"),
-    token: process.env.GRPC_TOKEN ?? "",
-  },
-  jito: {
-    region,
-    blockEngineUrl,
-    tipFloorUrl: "https://bundles.jito.wtf/api/v1/bundles/tip_floor",
-  },
-  wallet: loadKeypair(required("WALLET_SECRET")),
-  ai: {
-    apiKey: required("ANTHROPIC_API_KEY"),
-    model: optional("AI_MODEL", "claude-sonnet-4-6"),
-  },
-  tuning: {
-    leaderWindowSlots: int("LEADER_WINDOW_SLOTS", 3),
-    maxTipLamports: int("MAX_TIP_LAMPORTS", 100_000),
-    probeTransferLamports: int("PROBE_TRANSFER_LAMPORTS", 1_000),
-  },
-} as const;
+// Walk up from the cwd so a single repo-root .env is found whether a command runs
+// from the root or from inside a workspace package.
+const findEnvFile = (): string | undefined => {
+  let dir = process.cwd();
+  for (let depth = 0; depth < 6; depth++) {
+    const candidate = join(dir, ".env");
+    if (existsSync(candidate)) return candidate;
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return undefined;
+};
 
-export type AppConfig = typeof config;
+export const loadConfigFromEnv = (): JettiConfig => {
+  const path = findEnvFile();
+  dotenv.config(path ? { path, override: true } : { override: true });
+
+  const region = parseRegion(optional("JITO_REGION", "frankfurt"));
+  return {
+    rpc: { http: required("RPC_HTTP_URL"), wss: process.env.RPC_WSS_URL },
+    grpc: { url: required("GRPC_URL"), token: process.env.GRPC_TOKEN ?? "" },
+    jito: {
+      region,
+      blockEngineUrl: blockEngineUrlFor(region),
+      tipFloorUrl: "https://bundles.jito.wtf/api/v1/bundles/tip_floor",
+    },
+    wallet: loadKeypair(required("WALLET_SECRET")),
+    ai: {
+      apiKey: required("ANTHROPIC_API_KEY"),
+      model: optional("AI_MODEL", "claude-haiku-4-5-20251001"),
+    },
+    tuning: {
+      leaderWindowSlots: int("LEADER_WINDOW_SLOTS", 3),
+      maxTipLamports: int("MAX_TIP_LAMPORTS", 100_000),
+      probeTransferLamports: int("PROBE_TRANSFER_LAMPORTS", 1_000),
+      baseTipPercentile: parseTipPercentile(
+        optional("BASE_TIP_PERCENTILE", "p75"),
+      ),
+    },
+  };
+};

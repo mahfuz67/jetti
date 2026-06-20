@@ -1,28 +1,33 @@
-import { config } from "@/config/env";
-import { connection } from "@/core/connection";
-import { readNetworkConditions } from "@/core/network";
+import { loadConfigFromEnv } from "@/config/env";
+import { createContext } from "@/context";
+import { readNetworkConditions } from "@/conditions";
 import { leaderWindowAt } from "@/leader/schedule";
 import { getRandomTipAccount } from "@/bundle/tip-accounts";
-import { buildProbeBundle } from "@/bundle/build";
+import { buildBundle } from "@/bundle/build";
 import { logger } from "@/core/logger";
 
 const main = async (): Promise<void> => {
+  const ctx = createContext(loadConfigFromEnv());
+
   logger.info(
-    { wallet: config.wallet.publicKey.toBase58(), region: config.jito.region },
+    {
+      wallet: ctx.config.wallet.publicKey.toBase58(),
+      region: ctx.config.jito.region,
+    },
     "config loaded",
   );
 
-  const balance = await connection.getBalance(
-    config.wallet.publicKey,
+  const balance = await ctx.connection.getBalance(
+    ctx.config.wallet.publicKey,
     "confirmed",
   );
   logger.info({ lamports: balance, sol: balance / 1e9 }, "wallet balance");
 
-  const slot = await connection.getSlot("confirmed");
-  const window = await leaderWindowAt(slot);
+  const slot = await ctx.connection.getSlot("confirmed");
+  const window = await leaderWindowAt(ctx, slot);
   logger.info(window, "leader window");
 
-  const conditions = await readNetworkConditions();
+  const conditions = await readNetworkConditions(ctx);
   logger.info(
     {
       p50: conditions.tips.p50,
@@ -33,14 +38,11 @@ const main = async (): Promise<void> => {
     "live tips + congestion",
   );
 
-  const tipAccount = await getRandomTipAccount();
-  logger.info(
-    { tipAccount: tipAccount.toBase58() },
-    "selected jito tip account",
-  );
+  const tipAccount = await getRandomTipAccount(ctx);
+  logger.info({ tipAccount: tipAccount.toBase58() }, "selected jito tip account");
 
-  const bh = await connection.getLatestBlockhash("confirmed");
-  const bundle = await buildProbeBundle({
+  const bh = await ctx.connection.getLatestBlockhash("confirmed");
+  const bundle = await buildBundle(ctx, { kind: "probe" }, {
     blockhash: bh.blockhash,
     lastValidBlockHeight: bh.lastValidBlockHeight,
     tipLamports: conditions.baseTip,

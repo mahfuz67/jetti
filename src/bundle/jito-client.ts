@@ -1,4 +1,4 @@
-import { config } from "@/config/env";
+import type { JettiContext } from "@/context";
 
 interface RpcOk<T> {
   jsonrpc: "2.0";
@@ -23,11 +23,14 @@ interface WithValue<T> {
   value: T[];
 }
 
-const endpoint = `${config.jito.blockEngineUrl}/api/v1/bundles`;
-
 let nextId = 1;
 
-const rpc = async <T>(method: string, params: unknown[]): Promise<T> => {
+const rpc = async <T>(
+  ctx: JettiContext,
+  method: string,
+  params: unknown[],
+): Promise<T> => {
+  const endpoint = `${ctx.config.jito.blockEngineUrl}/api/v1/bundles`;
   const res = await fetch(endpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -56,13 +59,17 @@ export class JitoRpcError extends Error {
   }
 }
 
-export const getTipAccounts = (): Promise<string[]> =>
-  rpc<string[]>("getTipAccounts", []);
+export const getTipAccounts = (ctx: JettiContext): Promise<string[]> =>
+  rpc<string[]>(ctx, "getTipAccounts", []);
 
-export const sendBundle = (base64Txs: string[]): Promise<string> =>
-  rpc<string>("sendBundle", [base64Txs, { encoding: "base64" }]);
+export const sendBundle = (
+  ctx: JettiContext,
+  base64Txs: string[],
+): Promise<string> =>
+  rpc<string>(ctx, "sendBundle", [base64Txs, { encoding: "base64" }]);
 
 export const getInflightBundleStatuses = (
+  ctx: JettiContext,
   bundleIds: string[],
 ): Promise<WithValue<InflightStatus>> =>
-  rpc<WithValue<InflightStatus>>("getInflightBundleStatuses", [bundleIds]);
+  rpc<WithValue<InflightStatus>>(ctx, "getInflightBundleStatuses", [bundleIds]);

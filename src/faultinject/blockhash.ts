@@ -1,4 +1,4 @@
-import { connection } from "@/core/connection";
+import type { JettiContext } from "@/context";
 import { child } from "@/core/logger";
 
 const log = child({ mod: "faultinject" });
@@ -9,15 +9,16 @@ export interface InjectedBlockhash {
 }
 
 export const forceExpiredBlockhash = async (
+  ctx: JettiContext,
   slotsBack = 200,
 ): Promise<InjectedBlockhash> => {
   const [currentSlot, currentBlockHeight] = await Promise.all([
-    connection.getSlot("confirmed"),
-    connection.getBlockHeight("confirmed"),
+    ctx.connection.getSlot("confirmed"),
+    ctx.connection.getBlockHeight("confirmed"),
   ]);
   const oldSlot = currentSlot - slotsBack;
 
-  const block = await connection.getBlock(oldSlot, {
+  const block = await ctx.connection.getBlock(oldSlot, {
     maxSupportedTransactionVersion: 0,
     transactionDetails: "none",
     rewards: false,

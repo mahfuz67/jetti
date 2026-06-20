@@ -64,6 +64,7 @@ const main = (): void => {
   };
   const landedTips: number[] = [];
   const notLandedTips: number[] = [];
+  const opTimings: Record<string, number[]> = {};
   const failures = new Map<string, number>();
   const decisions = { RETRY: 0, ABORT: 0, refresh: 0, wait: 0 };
 
@@ -79,6 +80,9 @@ const main = (): void => {
       for (const stage of Object.keys(deltas)) {
         const v = d[stage];
         if (typeof v === "number") deltas[stage]!.push(v);
+      }
+      for (const [op, ms] of Object.entries(a.timings ?? {})) {
+        (opTimings[op] ??= []).push(ms);
       }
       if (a.failure)
         failures.set(a.failure.class, (failures.get(a.failure.class) ?? 0) + 1);
@@ -120,6 +124,31 @@ const main = (): void => {
     console.log(
       `  ${stage.padEnd(24)} ${String(arr.length).padStart(4)} ${fmt(percentile(arr, 0.5)).padStart(7)} ${fmt(percentile(arr, 0.9)).padStart(7)} ${fmt(max).padStart(7)}   ${noteOf[stage]}`,
     );
+  }
+
+  const opOrder = [
+    "window_wait",
+    "blockhash",
+    "build",
+    "send",
+    "track",
+    "classify_reads",
+    "snapshot",
+    "ai_decide",
+  ];
+  const opKeys = Object.keys(opTimings).sort(
+    (a, b) => opOrder.indexOf(a) - opOrder.indexOf(b),
+  );
+  if (opKeys.length > 0) {
+    console.log(
+      "\nStack op latency (ms)         n     p50     p90     max",
+    );
+    for (const op of opKeys) {
+      const arr = opTimings[op]!;
+      console.log(
+        `  ${op.padEnd(24)} ${String(arr.length).padStart(4)} ${fmt(percentile(arr, 0.5)).padStart(7)} ${fmt(percentile(arr, 0.9)).padStart(7)} ${fmt(Math.max(...arr)).padStart(7)}`,
+      );
+    }
   }
 
   console.log("\nTips (lamports)");

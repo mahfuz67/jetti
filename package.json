@@ -2,22 +2,35 @@
   "name": "jetti",
   "version": "0.1.0",
   "private": true,
-  "description": "Jetti — a smart Solana transaction stack: Yellowstone streaming, Jito bundles, lifecycle tracking, and an AI-driven retry agent.",
+  "description": "Jetti — a smart Solana transaction SDK: Yellowstone streaming, Jito bundles, lifecycle tracking, and an AI-driven retry agent.",
   "type": "module",
   "packageManager": "yarn@1.22.19",
   "engines": {
     "node": ">=20"
   },
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "smoke": "tsx src/scripts/smoke.ts",
-    "stream": "tsx src/scripts/stream-probe.ts",
-    "bundle:one": "tsx src/scripts/send-one.ts",
-    "batch": "tsx src/scripts/run-batch.ts",
-    "demo:fault": "tsx src/scripts/demo-fault.ts",
-    "report": "tsx src/scripts/report.ts",
+    "build": "tsup",
+    "prepare": "tsup",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "smoke": "tsx scripts/smoke.ts",
+    "stream": "tsx scripts/stream-probe.ts",
+    "bundle:one": "tsx scripts/send-one.ts",
+    "batch": "tsx scripts/run-batch.ts",
+    "demo:fault": "tsx scripts/demo-fault.ts",
+    "report": "tsx scripts/report.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
@@ -31,6 +44,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "tsup": "^8.3.5",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"

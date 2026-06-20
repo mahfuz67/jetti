@@ -15,17 +15,32 @@ export interface TrackResult {
   txErr: unknown;
 }
 
+export type StageListener = (
+  stage: StageRecord["stage"],
+  slot: number,
+  at: number,
+) => void;
+
+export interface TrackOptions {
+  pollEarlyExit?: () => Promise<boolean>;
+  pollIntervalMs?: number;
+  onStage?: StageListener;
+}
+
 interface Pending {
   signature: string;
   landedSlot: number | null;
   txErr: unknown;
   stages: StageRecord[];
+  onStage?: StageListener;
   settle: (result: TrackResult) => void;
 }
 
 export class LifecycleTracker {
+  private latestSlot = 0;
   private confirmedWatermark = 0;
   private finalizedWatermark = 0;
+  private slotWaiters: Array<() => void> = [];
   private readonly pending = new Map<string, Pending>();
 
   constructor(stream: YellowstoneStream) {
@@ -33,16 +48,42 @@ export class LifecycleTracker {
     stream.on("transaction", (e) => this.onTransaction(e));
   }
 
-  track(signature: string, timeoutMs: number): Promise<TrackResult> {
+  get currentSlot(): number {
+    return this.latestSlot;
+  }
+
+  waitForSlot(timeoutMs: number): Promise<void> {
+    return new Promise((resolve) => {
+      let fn: () => void;
+      const timer = setTimeout(() => {
+        this.slotWaiters = this.slotWaiters.filter((w) => w !== fn);
+        resolve();
+      }, timeoutMs);
+      fn = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+      this.slotWaiters.push(fn);
+    });
+  }
+
+  track(
+    signature: string,
+    timeoutMs: number,
+    options: TrackOptions = {},
+  ): Promise<TrackResult> {
     return new Promise<TrackResult>((resolve) => {
       let timer: ReturnType<typeof setTimeout>;
+      let poller: ReturnType<typeof setInterval> | undefined;
       const entry: Pending = {
         signature,
         landedSlot: null,
         txErr: null,
         stages: [{ stage: "submitted", slot: null, at: Date.now() }],
+        onStage: options.onStage,
         settle: (result) => {
           clearTimeout(timer);
+          if (poller) clearInterval(poller);
           this.pending.delete(signature);
           resolve(result);
         },
@@ -60,6 +101,31 @@ export class LifecycleTracker {
           txErr: entry.txErr,
         });
       }, timeoutMs);
+
+      if (options.pollEarlyExit) {
+        const poll = options.pollEarlyExit;
+        let polling = false;
+        poller = setInterval(async () => {
+          if (polling || entry.landedSlot !== null) return;
+          polling = true;
+          let failed = false;
+          try {
+            failed = await poll();
+          } catch {
+            failed = false;
+          } finally {
+            polling = false;
+          }
+          if (failed && this.pending.get(signature) === entry && entry.landedSlot === null) {
+            entry.settle({
+              landed: false,
+              landedSlot: null,
+              stages: entry.stages,
+              txErr: entry.txErr,
+            });
+          }
+        }, options.pollIntervalMs ?? 2_000);
+      }
     });
   }
 
@@ -73,11 +139,18 @@ export class LifecycleTracker {
   }
 
   private onSlot(e: SlotEvent): void {
+    if (e.slot > this.latestSlot) this.latestSlot = e.slot;
     if (e.status === "confirmed" && e.slot > this.confirmedWatermark)
       this.confirmedWatermark = e.slot;
     if (e.status === "finalized" && e.slot > this.finalizedWatermark)
       this.finalizedWatermark = e.slot;
     for (const entry of this.pending.values()) this.tryAdvance(entry);
+
+    if (this.slotWaiters.length > 0) {
+      const waiters = this.slotWaiters;
+      this.slotWaiters = [];
+      for (const w of waiters) w();
+    }
   }
 
   private tryAdvance(entry: Pending): void {
@@ -110,7 +183,9 @@ export class LifecycleTracker {
     slot: number,
   ): void {
     if (this.hasStage(entry, stage)) return;
-    entry.stages.push({ stage, slot, at: Date.now() });
+    const at = Date.now();
+    entry.stages.push({ stage, slot, at });
+    entry.onStage?.(stage, slot, at);
     log.debug({ sig: entry.signature, stage, slot }, "stage advanced");
   }
 
