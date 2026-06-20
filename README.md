@@ -1,16 +1,52 @@
 # Jetti
 
-**Jetti** is an infrastructure-grade Solana transaction stack that observes the network in real time, submits Jito bundles intelligently, tracks every transaction across all commitment levels, classifies failures, and lets an **AI agent own the retry decision** autonomously.
+**Jetti** is a smart Solana transaction **SDK**: `npm install jetti`, `import { Jetti }`, and get intelligent Jito-bundle submission, live lifecycle tracking across every commitment level, failure classification, and an **AI agent that owns the retry decision** autonomously. The same SDK powers the demo scripts below and an optional web demo in [`examples/web`](examples/web).
 
 Built for the *Advanced Infrastructure Challenge — Build a Smart Transaction Stack*.
 
 - **Streaming:** Yellowstone gRPC (slots at every commitment level + our own transactions), consumed via async iteration for natural backpressure, with reconnection and resubscribe on error.
 - **Submission:** real Jito bundles via the Block Engine JSON-RPC (`sendBundle`), gated on a detected leader window (the orchestrator holds until enough of a leader's turn remains before sending), with the tip computed dynamically from the live tip-floor API and network congestion — no hardcoded tips.
-- **Lifecycle:** stream-driven state machine (`submitted → processed → confirmed → finalized`) capturing slot numbers, timestamps, and latency deltas.
+- **Lifecycle:** stream-driven state machine (`submitted → processed → confirmed → finalized`) capturing slot numbers, timestamps, and latency deltas. **Landing is confirmed exclusively from the stream** — a Jito `getInflightBundleStatuses` poll is used *only* to detect a terminal failure early (so a lost auction doesn't wait out the full timeout), never to confirm a landing.
 - **Failures:** classified into `EXPIRED_BLOCKHASH`, `FEE_TOO_LOW`, `COMPUTE_EXCEEDED`, `BUNDLE_FAILED`, `NOT_LANDED`.
 - **AI agent:** on failure, a Claude agent reasons over a live snapshot and decides whether to retry, whether to refresh the blockhash, the new tip, and whether to wait for a leader window. The retry flow is **not** hardcoded.
 
 > Network note: Jito's Block Engine runs on **mainnet** and testnet only — there is no devnet Block Engine. This stack runs on **mainnet** using minimal self-transfer probe transactions and tips near the floor, so a full lifecycle run costs a fraction of a cent.
+
+## Use it as an SDK
+
+```bash
+npm install jetti        # or: yarn add jetti
+```
+
+```ts
+import { Jetti, loadConfigFromEnv } from "jetti";
+
+const jetti = new Jetti(loadConfigFromEnv());
+await jetti.start();
+
+// Smart-send: dynamic tip, leader-window timing, AI-driven retry, live events.
+const lifecycle = await jetti.send({
+  payload: { kind: "instructions", instructions, signers },
+  onEvent: (e) => console.log(e.type, e),
+});
+
+// Or just observe — no wallet needed:
+await jetti.conditions();       // live tip floor + congestion + recommended tip
+await jetti.track(signature);   // watch any signature across commitment stages
+
+jetti.stop();
+```
+
+| Method | Purpose |
+|---|---|
+| `send(request)` | submit a bundle — dynamic tip, leader timing, AI retry, live `JettiEvent`s |
+| `track(signature)` | watch any signature across `submitted → processed → confirmed → finalized` |
+| `conditions()` / `recommendTip()` | live tip percentiles, congestion, recommended opening tip |
+| `simulate(payload)` | dry-run a transaction (no submit, no spend) |
+| `classify(input)` | classify a failure |
+| `buildBundle(payload)` | build a tipped bundle as a primitive |
+
+`payload` is `{ kind: "probe" }`, `{ kind: "instructions", instructions, signers }`, or `{ kind: "transaction", transaction }` — so you can send the built-in probe, your own instructions, or a fully prebuilt transaction. Config comes from the constructor (`loadConfigFromEnv()` is a convenience that reads the `.env` below).
 
 ## Architecture
 
@@ -32,18 +68,29 @@ The AI layer is isolated: `ai/agent.ts` is a pure `snapshot → decision` functi
 
 ## Module map
 
+Single package: the SDK lives in `src/`, builds to `dist/` (tsup), and the `examples/web` demo consumes that build.
+
 | Path | Responsibility |
 |---|---|
+| `src/index.ts` | Public SDK surface (`Jetti`, types, `loadConfigFromEnv`) |
+| `src/client.ts` | The `Jetti` client — SDK entry point (send / track / conditions / simulate / …) |
+| `src/context.ts` | Dependency-injected `JettiContext` (connection, config, caches) — no globals |
+| `src/events.ts` | `JettiEvent` lifecycle events + `SendRequest` |
 | `src/config/env.ts` | Typed env + endpoints + keypair loading |
 | `src/stream/yellowstone.ts` | gRPC client: slot + tx subscription, ping keepalive, reconnect/backoff |
-| `src/leader/schedule.ts` | Leader schedule cache + submission-window detection (enforced as a pre-send gate in the orchestrator) |
-| `src/tip/tip-floor.ts`, `src/tip/recommend.ts` | Live tip percentiles + congestion-aware base tip |
-| `src/bundle/jito-client.ts`, `build.ts`, `tip-accounts.ts` | Bundle construction + Block Engine JSON-RPC |
-| `src/lifecycle/tracker.ts` | Stream-driven commitment state machine + latency deltas |
+| `src/stream/ready.ts` | Stream bootstrap (await first connect before submitting) |
+| `src/leader/schedule.ts` | Leader schedule cache + submission-window detection, with background prefetch before the cached range exhausts |
+| `src/tip/tip-floor.ts`, `src/tip/recommend.ts` | Live tip percentiles (short TTL cache) + congestion-aware base tip at a configurable percentile |
+| `src/bundle/jito-client.ts`, `build.ts`, `tip-accounts.ts` | Bundle construction (probe / instructions / prebuilt tx, separate tip tx) + Block Engine JSON-RPC |
+| `src/bundle/simulate.ts` | Cost-free dry-run (`simulateTransaction`) before a real send |
+| `src/lifecycle/tracker.ts` | Stream-driven commitment state machine + latency deltas; exposes the live slot to the orchestrator |
 | `src/failure/classify.ts` | Failure classification (pure) |
 | `src/ai/agent.ts` | Claude retry controller (pure snapshot → decision) |
 | `src/faultinject/blockhash.ts` | Deliberate blockhash-expiry fault injection |
-| `src/retry/orchestrator.ts` | Submit → track → classify → AI decide → retry loop |
+| `src/retry/orchestrator.ts` | Submit → track → classify → AI decide → retry loop, with per-op latency timing and early failure exit |
+| `src/core/blockhash.ts` | Background blockhash refresher (fetched at `confirmed`, ~2 s) so sends carry a fresh hash with no in-window RPC |
+| `src/conditions.ts` | Congestion (skip-rate) signal + composed network conditions |
+| `src/core/warmup.ts` | Pre-warms RPC / Jito / Anthropic connections at startup to remove cold-start TLS from the first bundle |
 | `src/logs/` | JSONL lifecycle log + pretty renderer |
 
 ## Setup
@@ -72,8 +119,9 @@ solana address -k keys/hot.json
 | `GRPC_URL` / `GRPC_TOKEN` | Yellowstone gRPC endpoint + auth token |
 | `JITO_REGION` | Lowest-latency Block Engine region (`frankfurt`, `ny`, `amsterdam`, …) |
 | `WALLET_SECRET` | base58 secret key of the hot wallet |
-| `ANTHROPIC_API_KEY` / `AI_MODEL` | Claude credentials for the agent |
+| `ANTHROPIC_API_KEY` / `AI_MODEL` | Claude credentials for the agent (defaults to Haiku — fast/cheap for the retry decision) |
 | `MAX_TIP_LAMPORTS` | Hard ceiling the agent may never exceed (cost guardrail) |
+| `BASE_TIP_PERCENTILE` | Opening tip percentile off the live floor (`p25`–`p99`, default `p75`); higher lands sooner, and unlanded bundles pay no tip |
 
 ## Running
 
@@ -84,6 +132,13 @@ yarn demo:fault    # inject a blockhash expiry; watch the AI agent recover
 yarn batch         # produce the lifecycle log (10+ bundles, incl. faults)
 yarn typecheck
 yarn test          # pure-core unit tests (classifier, tip math)
+```
+
+**Web demo** — a live UI built on the SDK (Send / Track / Conditions, with the commitment timeline streamed over SSE):
+
+```bash
+yarn build                       # build the SDK (dist/) the demo imports
+cd examples/web && yarn install && yarn dev   # http://localhost:3000
 ```
 
 Lifecycle logs are written to `logs/lifecycle-<date>.jsonl`. The `logs/` directory is
@@ -129,7 +184,7 @@ These are observations from actually operating the stack on mainnet, not theory.
 - `@triton-one/yellowstone-grpc` (1.4.x) serializes every map field, so a *bare* ping request (maps left `undefined`) throws `Cannot convert undefined or null to object` and kills the stream. Every written request — pings included — must carry the empty maps.
 - The package ships as CommonJS; under ESM the default import resolves to the module namespace, so the constructor lives on `.default`.
 
-**Aggregate run stats** (`yarn report` over the committed log): land rate `<fill>`%, median `processed→confirmed` `<fill>` ms, median `confirmed→finalized` `<fill>` ms, failures by class `<fill>`.
+**Aggregate run stats** (`yarn report` over the committed log, 12 bundles): land rate **75%** (9/12 — 2 on attempt 1, 7 on attempt 2 after an AI-driven retry, 3 never landed), median `processed→confirmed` **353 ms** (p90 527 ms), median `confirmed→finalized` **11,844 ms** (~32-slot finalization lag), failures by class **BUNDLE_FAILED ×9, EXPIRED_BLOCKHASH ×2 (both injected faults, both recovered), NOT_LANDED ×1**. The agent issued 9 RETRY and 2 ABORT decisions, refreshing the blockhash on 5 and waiting for a leader window on 6 — and the run survived a live Jito `HTTP 429: globally rate limited` and real `expired blockhash` rejections without crashing.
 
 ---
 
