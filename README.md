@@ -154,6 +154,22 @@ progression with timestamps, the per-stage latency `deltas`, the tip amount per 
 and the failure classification + AI reasoning where applicable. One entry per line; each
 is a `BundleLifecycle` with a `signature` + `landedSlot` judges can paste into an explorer.
 
+## Web example
+
+A live UI built on the SDK ([`examples/web`](examples/web)) — submit a bundle and watch every commitment stage stream in over SSE, with the agent's retry reasoning inline.
+
+**Send** — a probe bundle walking the full lifecycle: attempt 1 loses the Jito auction (`BUNDLE_FAILED`), the agent reasons about the fee spike and escalates the tip, attempt 2 lands, and the timeline advances `submitted → processed → confirmed → finalized → landed` with the on-chain signature.
+
+![Send — live commitment timeline with AI-driven retry](docs/screenshots/send-lifecycle.png)
+
+**Conditions** — live Jito tip-floor percentiles, congestion (skip rate), and the recommended opening tip.
+
+![Conditions — live tip floor and congestion](docs/screenshots/conditions.png)
+
+**Track** — paste any signature and watch it advance across commitment stages from the stream.
+
+![Track — signature across commitment stages](docs/screenshots/track.png)
+
 ## AI agent: how the decision is real, not a wrapper
 
 When a bundle fails, the orchestrator builds a `NetworkSnapshot` — failure class, blockhash age vs. validity, live tip percentiles, our recent land rate, leader-window state, attempt number — and hands it to the Claude agent. The agent returns strict JSON **plus a free-text `reasoning` field that is logged verbatim**:
