@@ -24,9 +24,9 @@ const params = {
 };
 
 describe("assembleBundle", () => {
-  it("builds a 2-tx bundle (user + separate tip) for a probe", () => {
+  it("builds a single-tx bundle (tip inline) for a probe", () => {
     const bundle = assembleBundle(ctx, { kind: "probe" }, params, tipAccount);
-    expect(bundle.base64Txs).toHaveLength(2);
+    expect(bundle.base64Txs).toHaveLength(1);
     expect(bundle.tipAccount).toBe(tipAccount.toBase58());
     expect(bundle.tipLamports).toBe(5_000);
     expect(bundle.blockhash).toBe(fakeBlockhash);
@@ -48,7 +48,7 @@ describe("assembleBundle", () => {
       params,
       tipAccount,
     );
-    expect(bundle.base64Txs).toHaveLength(2);
+    expect(bundle.base64Txs).toHaveLength(1);
     expect(bundle.lastValidBlockHeight).toBe(1_000);
   });
 

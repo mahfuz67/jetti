@@ -45,6 +45,8 @@ const rpc = async <T>(
   if ("error" in body) {
     throw new JitoRpcError(method, body.error.code, body.error.message);
   }
+
+  // console.log(`Jito ${method} response:`, body.result);
   return body.result;
 };
 

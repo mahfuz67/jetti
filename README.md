@@ -52,7 +52,7 @@ jetti.stop();
 
 The full design — system architecture, components, data flow, infrastructure decisions, failure-handling strategy, and the AI agent's responsibilities — is in the public architecture document:
 
-**📐 Architecture document:** https://gist.github.com/mahfuz67/75c162806395bcc4c01440f07afe1ea6
+**📐 Architecture document:** https://www.figma.com/board/nXYIxhr9DbCwfCZlJfzl0R/Jetti-%E2%80%94-System-Architecture?node-id=0-1&t=nleMDT940qeBXV1j-1
 
 ```
 Yellowstone gRPC ─► stream/ ─► leader/        ┐
@@ -81,7 +81,7 @@ Single package: the SDK lives in `src/`, builds to `dist/` (tsup), and the `exam
 | `src/stream/ready.ts` | Stream bootstrap (await first connect before submitting) |
 | `src/leader/schedule.ts` | Leader schedule cache + submission-window detection, with background prefetch before the cached range exhausts |
 | `src/tip/tip-floor.ts`, `src/tip/recommend.ts` | Live tip percentiles (short TTL cache) + congestion-aware base tip at a configurable percentile |
-| `src/bundle/jito-client.ts`, `build.ts`, `tip-accounts.ts` | Bundle construction (probe / instructions / prebuilt tx, separate tip tx) + Block Engine JSON-RPC |
+| `src/bundle/jito-client.ts`, `build.ts`, `tip-accounts.ts` | Bundle construction (probe / instructions → tip inline as a single tx; prebuilt tx → separate tip tx) + Block Engine JSON-RPC |
 | `src/bundle/simulate.ts` | Cost-free dry-run (`simulateTransaction`) before a real send |
 | `src/lifecycle/tracker.ts` | Stream-driven commitment state machine + latency deltas; exposes the live slot to the orchestrator |
 | `src/failure/classify.ts` | Failure classification (pure) |
@@ -171,11 +171,11 @@ Different snapshots produce different decisions: an expiry forces a refresh; a `
 
 These are observations from actually operating the stack on mainnet, not theory. `yarn report` regenerates the aggregate figures from the committed lifecycle log.
 
-**1. "Submitted to Jito" ≠ "landed on-chain."** A successful `sendBundle` (returning a `bundleId`) tells you nothing about inclusion — only the stream/chain does. In one run, attempts 1–2 (tips 2,810 / 5,878 lamports) lost the Jito auction and produced *no on-chain transaction at all*, while attempt 3 (10,000 lamports) landed and finalized at slot `426924880`. The stack reports exactly one wallet transaction for that bundle, which is correct. Conflating submission with landing is the most common way these systems lie to you.
+**1. "Submitted to Jito" ≠ "landed on-chain."** A successful `sendBundle` (returning a `bundleId`) tells you nothing about inclusion — only the stream/chain does. In one run, attempt 1 (tip 3,447 lamports) lost the Jito auction and produced *no on-chain transaction at all*, while attempt 2 (12,000 lamports) landed and finalized at slot `427731007`. The stack reports exactly one wallet transaction for that bundle, which is correct. Conflating submission with landing is the most common way these systems lie to you.
 
 **2. The tip floor is bimodal and spikes violently.** In calm conditions we observed p50 ≈ 2,500–5,000 lamports, but during a live congestion event p95 jumped to **650,341** and p99 to **1,000,000** lamports within minutes — a ~200× spread between median and tail. The practical consequence: a fixed tip is useless, *and* a cost ceiling (`MAX_TIP_LAMPORTS`) becomes a binding constraint exactly when you most want to land. That cost-vs-landing tradeoff is real, not hypothetical — we watched the agent bump against the 100k ceiling while p95 sat far above it.
 
-**3. Finalization lag is real and measurable.** Our logs show `confirmed → finalized` ≈ **12.2 s** (~32 slots) against `processed → confirmed` ≈ **266 ms**. That two-orders-of-magnitude gap is exactly why we fetch blockhashes at `confirmed` (Q2) and treat `confirmed` as "landed" rather than waiting on finalization (Q1).
+**3. Finalization lag is real and measurable.** Our logs show `confirmed → finalized` ≈ **12.3 s** (~32 slots) against `processed → confirmed` ≈ **311 ms**. That two-orders-of-magnitude gap is exactly why we fetch blockhashes at `confirmed` (Q2) and treat `confirmed` as "landed" rather than waiting on finalization (Q1).
 
 **4. Jito rate-limits globally under load.** During the same congestion event, `sendBundle` returned `HTTP 429: globally rate limited`. Landing probability collapses during network-wide events regardless of your tip; the stack classifies the failure and the agent continues rather than crashing.
 
@@ -184,7 +184,7 @@ These are observations from actually operating the stack on mainnet, not theory.
 - `@triton-one/yellowstone-grpc` (1.4.x) serializes every map field, so a *bare* ping request (maps left `undefined`) throws `Cannot convert undefined or null to object` and kills the stream. Every written request — pings included — must carry the empty maps.
 - The package ships as CommonJS; under ESM the default import resolves to the module namespace, so the constructor lives on `.default`.
 
-**Aggregate run stats** (`yarn report` over the committed log, 12 bundles): land rate **75%** (9/12 — 2 on attempt 1, 7 on attempt 2 after an AI-driven retry, 3 never landed), median `processed→confirmed` **353 ms** (p90 527 ms), median `confirmed→finalized` **11,844 ms** (~32-slot finalization lag), failures by class **BUNDLE_FAILED ×9, EXPIRED_BLOCKHASH ×2 (both injected faults, both recovered), NOT_LANDED ×1**. The agent issued 9 RETRY and 2 ABORT decisions, refreshing the blockhash on 5 and waiting for a leader window on 6 — and the run survived a live Jito `HTTP 429: globally rate limited` and real `expired blockhash` rejections without crashing.
+**Aggregate run stats** (`yarn report` over the committed log, 12 bundles): land rate **100%** (12/12 — every bundle landed once the agent recovered 6 lost auctions and 2 injected blockhash-expiry faults), median `processed→confirmed` **311 ms** (p90 503 ms), median `confirmed→finalized` **12,274 ms** (~32-slot finalization lag), failures by class **BUNDLE_FAILED ×6, EXPIRED_BLOCKHASH ×2 (both injected faults, both recovered)**. The agent issued 8 RETRY and 0 ABORT decisions, refreshing the blockhash on the 2 expiries and waiting for a leader window on 4 — handling real `expired blockhash` rejections and Jito auction losses without crashing.
 
 ---
 
@@ -218,4 +218,4 @@ Crucially, a bundle is **not** durably queued across many future leaders: it tar
 
 ## Lifecycle log
 
-`logs/lifecycle-<date>.jsonl` contains ≥ 10 real bundle submissions including ≥ 2 failure cases (two are forced via blockhash-expiry injection to exercise the agent; others fail naturally when no leader window lands them in time). Each line is one `BundleLifecycle` with per-attempt slots, commitment stages + timestamps, tip amounts, failure class, and the AI decision/reasoning. Judges can paste any `landedSlot` / signature into an explorer to confirm the stack ran on real infrastructure.
+`logs/lifecycle-<date>.jsonl` contains ≥ 10 real bundle submissions including ≥ 2 failure cases (two are forced via blockhash-expiry injection to exercise the agent; the rest are real Jito auction losses — every failure recovered on retry, so all 12 bundles ultimately landed). Each line is one `BundleLifecycle` with per-attempt slots, commitment stages + timestamps, tip amounts, failure class, and the AI decision/reasoning. Judges can paste any `landedSlot` / signature into an explorer to confirm the stack ran on real infrastructure.
